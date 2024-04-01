@@ -31,7 +31,14 @@
 *.out
 *.app
 
-# Visio Studio files
+# Visual Studio files
 .vs/
 x64/
 x32/
+*/.vs/
+*/x64/
+*/x32/
+
+# Visual Studio Code files
+.vscode/
+*/.vscode/

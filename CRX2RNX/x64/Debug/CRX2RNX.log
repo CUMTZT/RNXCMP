@@ -1,3 +1,0 @@
-﻿  main.cpp
-E:\WorkSpace\C++\RNXCMP\CRX2RNX\main.cpp(693,46): warning C4244: “=”: 从“__int64”转换到“int”，可能丢失数据
-  CRX2RNX.vcxproj -> E:\WorkSpace\C++\RNXCMP\x64\Debug\CRX2RNX.exe
