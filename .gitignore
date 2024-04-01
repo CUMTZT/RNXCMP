@@ -30,3 +30,6 @@
 *.exe
 *.out
 *.app
+
+# Visio Studio files
+*.vs
