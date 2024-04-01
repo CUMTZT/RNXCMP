@@ -32,4 +32,6 @@
 *.app
 
 # Visio Studio files
-*.vs
+.vs/
+x64/
+x32/
