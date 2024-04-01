@@ -614,6 +614,7 @@ void data(int* sattbl) {
         }
         else {
             p_buff = strdiff(flag0[*i0], flag[i], p_buff);
+            //test
         }
     }
 }
