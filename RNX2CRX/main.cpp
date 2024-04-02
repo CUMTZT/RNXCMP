@@ -167,10 +167,15 @@ int main(int argc, char* argv[]) {
     /* sattbl[i]: order (at the previous epoch) of i-th satellite */
     /* (at the current epoch). -1 is set for the new satellites   */
 
-    parse_args(argc, argv);//解析参数
+    parse_args(argc, argv);//解析参数,与算法无关，可不关注
 
+    //设置GNSS的初值为-1，如果在文件中没有定义，就使用-1
     for (i = 0; i < UCHAR_MAX; i++) ntype_gnss[i] = -1;  /** -1 unless GNSS type is defined **/
+
+    //解析文件头
     header();
+
+    //根据文件头解析
     if (rinex_version == 2) {
         p_event = &newline[28];  /** pointer to event flag **/
         p_nsat = &newline[29];  /** pointer to n_sat **/
@@ -343,30 +348,42 @@ void parse_args(int argc, char* argv[]) {
 }
 /*---------------------------------------------------------------------*/
 void header(void) {
+    //定义数据存储数组
     char line[MAXCLM], line2[41], timestring[20];
+    //定义时间结构体对象
     time_t tc = time(NULL);
     struct tm* tp;
 
+    //获取当前的UTC时间，即当前北京时减去8小时，示例数据：“02-Apr-24 02:01”
     if ((tp = gmtime(&tc)) == NULL) tp = localtime(&tc);
     strftime(timestring, C1 * 20, "%d-%b-%y %H:%M", tp);
 
-    /*** Check RINEX VERSION / TYPE ***/
+    //检查rnx文件的第一行是否符合正确
     read_chk_line(line);
     if (strncmp(&line[60], "RINEX VERSION / TYPE", C1 * 20) != 0 ||
         strncmp(&line[20], "O", C1) != 0) error_exit(15, line);
 
+    //根据版本号输出crx文件的第一行
     rinex_version = atoi(line);
     if (rinex_version == 2) { printf("%-20.20s", CRX_VERSION1); }
     else if (rinex_version == 3 || rinex_version == 4) { printf("%-20.20s", CRX_VERSION2); }
     else { error_exit(15, line); }
     printf("%-40.40s%-20.20s\n", "COMPACT RINEX FORMAT", "CRINEX VERS   / TYPE");
 
+    //输出crx文件第二行
     sprintf(line2, "%s %s", PROGNAME, VERSION);
     printf("%-40.40s%-20.20sCRINEX PROG / DATE\n", line2, timestring);
+    //将rnx的第一行直接输出到crx的第三行
     printf("%s\n", line);
+
+    //循环读取，直至读到“END OF HEADER”
     do {
         read_chk_line(line);
+
+        //将读到的行输出到crx文件中
         printf("%s\n", line);
+
+        //解析数据行
         if (strncmp(&line[60], "# / TYPES OF OBSERV", C1 * 19) == 0 && line[5] != ' ') {
             ntype = atoi(line);                                        /** for RINEX2 **/
         }
@@ -789,7 +806,7 @@ void put_clock(long du, long dl, int c_order) {
         p_buff += sprintf(p_buff, "%ld%8.8ld\n", du, labs(dl));
     }
 }
-/*---------------------------------------------------------------------*/
+//读一行数据，检查该行的格式
 int  read_chk_line(char* line) {
     char* p;
     /***************************************/
