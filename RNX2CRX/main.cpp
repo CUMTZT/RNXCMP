@@ -200,7 +200,6 @@ int main(int argc, char* argv[]) {
 *       该for循环只有在exit时退出
 ****************************************************************************/
     for (CLEAR_BUFF;; FLUSH_BUFF) {
-    SKIP:
         //返回的时0，文件结束，正常退出程序
         if (!get_next_epoch(newline)) no_error_exit();
 
@@ -216,7 +215,7 @@ int main(int argc, char* argv[]) {
         if (ep_reset > 0 && ++ep_count > ep_reset) initialize_all(oldline, &nsat_old, 1);
 
 
-        //判断该行有没有时钟
+        //判断该行有没有时钟数据，有的话读取
         if (strchr(newline, '\0') > p_clock) {
             read_clock(p_clock, shift_clk);        /**** read clock offset ****/
         }
@@ -233,7 +232,7 @@ int main(int argc, char* argv[]) {
             if (ggetline(dy1[i], flag[i], p, &ntype_record[i])) {
                 CLEAR_BUFF;
                 exit_status = EXIT_WARNING;
-                goto SKIP;
+                continue;
             }
         }
         *p = '\0';    /*** terminate satellite list ***/
@@ -557,11 +556,12 @@ void put_event_data(char* p_line) {
         }
     }
 }
-/*---------------------------------------------------------------------*/
+//读取时钟数据,没有示例数据
 void read_clock(char* p_clock, int shift_clk) {
     /****  read the clock offset value ****/
     /**  *p_clock : pointer to beginning of clock data **/
-    char* p_dot;      /** pointer for decimal point **/
+
+    char* p_dot; 
     p_dot = p_clock + 2;
     if (*p_dot != '.')error_exit(7, p_clock);
 
