@@ -175,13 +175,13 @@ int main(int argc, char* argv[]) {
     //解析文件头
     header();
 
-    //根据文件头解析
+    //根据文件头解析，先申请长度为MAXCLM的数组，然后根据版本号将指针指向应该输入数据的位置
     if (rinex_version == 2) {
-        p_event = &newline[28];  /** pointer to event flag **/
-        p_nsat = &newline[29];  /** pointer to n_sat **/
-        p_satlst = &newline[32];  /** pointer to satellite list **/
-        p_satold = &oldline[32];  /** pointer to n_sat of the previous epoch **/
-        p_clock = &newline[68];  /** pointer to clock offset data **/
+        p_event = &newline[28];  //指向event flag
+        p_nsat = &newline[29];  //指向n_sat
+        p_satlst = &newline[32];  //指向satellite list
+        p_satold = &oldline[32];  //指向上一行的n_sat
+        p_clock = &newline[68];  //指向clock offset data
         shift_clk = 1;
     }
     else {
@@ -193,20 +193,30 @@ int main(int argc, char* argv[]) {
         shift_clk = 4;
     }
 
+/***************************************************************************
+* 简介：数据区的循环处理
+* 注释：for循环
+*       首先执行CLEAR_BUFF,然后执行for循环体内的代码，执行完后执行FLUSH_BUFF
+*       该for循环只有在exit时退出
+****************************************************************************/
     for (CLEAR_BUFF;; FLUSH_BUFF) {
     SKIP:
+        //返回的时0，文件结束，正常退出程序
         if (!get_next_epoch(newline)) no_error_exit();
 
-        /*** if event flag > 1, then (1)output event data  */
-        /*** (2)initialize all data arcs, and continue to next epoch ***/
+        //如果首行中p_event对应的值大于1，则需要输出event data
         if (atoi(strncpy(dummy, p_event, C1)) > 1) {
             put_event_data(newline);
             initialize_all(oldline, &nsat_old, 0);
             continue;
         }
 
+
+        //如果设置了“-e”，且值大于0，如果ep_count 大于了该值，则重置参数
         if (ep_reset > 0 && ++ep_count > ep_reset) initialize_all(oldline, &nsat_old, 1);
 
+
+        //判断该行有没有时钟
         if (strchr(newline, '\0') > p_clock) {
             read_clock(p_clock, shift_clk);        /**** read clock offset ****/
         }
@@ -393,63 +403,96 @@ void header(void) {
         }
     } while (strncmp(&line[60], "END OF HEADER", C1 * 13) != 0);
 }
-/*---------------------------------------------------------------------*/
+
+/***************************************************************************
+* 简介：获取下一个有效行
+* 注释：如果该行格式不正确则跳过，直至读取到正确的一行
+* 返回值：
+*       0：读取到了文件最后一行，并没有获取到相应的数据，结束算法
+*       1：读取到了正确一行，算法继续
+*       2：读取到了错误的一行
+****************************************************************************/
 int  get_next_epoch(char* p_line) {
-    /**** find next epoch line.                                                          ****/
-    /**** If the line seems to be abnormal, print warning message                        ****/
-    /**** and skip until next epoch is found                                             ****/
-    /**** return value  0 : end of the file                                              ****/
-    /****               1 : normal end                                                   ****/
-    /****               2 : trouble in the line                                          ****/
     char* p;
 
     nl_count++;
-    if (fgets(p_line, MAXCLM, stdin) == NULL) return 0;  /*** EOF: exit program successfully ***/
+    //读取一行,存放到p_line里面
+    if (fgets(p_line, MAXCLM, stdin) == NULL) return 0;//没有读取到数据，文件已经结束，返回0
 
+    //寻找换行符。如果没找到换行符，那么要么文件结束，要么格式存在问题
     if ((p = strchr(p_line, '\n')) == NULL) {
-        if (*p_line == '\032') return 0;              /** DOS EOF **/
+        
+        //该行是文件结束符，返回0
+        if (*p_line == '\032') return 0;           
+
+        //如果该行没有换行符，同时不是空行，或者文件尚未结束，因此该行格式不正确，跳到下一个epoch line
         if (*p_line != '\0' || feof(stdin) == 0) {
+            //如果参数配置中，配置不能够跳过格式不正确的行（即未加参数“-s”），退出程序
             if (!skip_strange_epoch) error_exit(12, p_line);
+
+            //跳到下一个epoch line
             skip_to_next(p_line);
+
+            //返回读到了错误的一行
             return 2;
         }
-        fprintf(stderr, "WARNING: null characters are detected at the end of file --> neglected.\n");
-        exit_status = EXIT_WARNING;
-        return 0;
+        //如果该行不是空行同时文件尚已经结束，文件缺少结束标识，提示缺少结束标识但正确结束文件处理
+        else {
+            fprintf(stderr, "WARNING: null characters are detected at the end of file --> neglected.\n");
+            exit_status = EXIT_WARNING;
+            return 0;
+        }
     }
-    if (*(p - 1) == '\r') { *(--p) = '\0'; };                   /*** remove DOS CR/LF ***/
-    while (*--p == ' ' && p > p_line) {}; *++p = '\0';         /*** chop blank ***/
+
+
+    //存在换行符
+
+    //将换行\r\n替换为\n
+    if (*(p - 1) == '\r') { *(--p) = '\0'; };
+
+    //从换行符\n（改行的最后一个字符）开始往前找，将找到的第一个不是空格字符后边的第一个空格置成\0
+    while (*--p == ' ' && p > p_line) {}; *++p = '\0';        
 
     if (rinex_version == 2) {
         if (strlen(p_line) < 29 || *p_line != ' '
             || *(p_line + 27) != ' ' || !isdigit(*(p_line + 28))
             || (*(p_line + 29) != ' ' && !isdigit(*(p_line + 29)) && *(p_line + 29) != '\0')) {
-            /**** ------- something strange is found in the epoch line ****/
+            //该行格式不正确，同时未开参数“-s”,退出
             if (!skip_strange_epoch) error_exit(6, p_line);
+
+            //该行格式不正确，判断第19个字符是否为“.”,如果不是清除所有内存
             if (*(p_line + 18) != '.')  CLEAR_BUFF;
+            //跳转到下一个epoch line
             skip_to_next(p_line);
             return 2;
         }
     }
-    else {    /* rinex_version == 3 or 4 */
+    //版本为3或4时
+    else {   
+        //如果第一个字符不是“>”，跳到下一个epoch line
         if (*p_line != '>') {
             if (!skip_strange_epoch) error_exit(6, p_line);
             CLEAR_BUFF;
             skip_to_next(p_line);
             return 2;
         }
+
+        //将长度补充到42，第43位置成“\0”
         while (p < (p_line + 41)) *p++ = ' '; /*** pad blank ***/
         *p = '\0';
     }
     return 1;
 }
-/*---------------------------------------------------------------------*/
+//跳到下一个epoch line
 void skip_to_next(char* p_line) {
+    //输出上一个不正确格式行
     fprintf(stderr, " WARNING at line %ld: strange format. skip to next epoch.\n", nl_count);
     exit_status = EXIT_WARNING;
 
+    //寻找下一个epoch line
     if (rinex_version == 2) {
-        do {                               /**** try to find next epoch line ****/
+        //如果版本号为2，要根据该行多个数据格式是否在范围内或者值是否符合格式才能判断改行是否为新的epoch line
+        do {                              
             read_chk_line(p_line);
         } while (strlen(p_line) < 29 || *p_line != ' ' || *(p_line + 3) != ' '
             || *(p_line + 6) != ' ' || *(p_line + 9) != ' '
@@ -458,14 +501,16 @@ void skip_to_next(char* p_line) {
             || !isdigit(*(p_line + 28)) || !isspace(*(p_line + 29))
             || (strlen(p_line) > 68 && *(p_line + 70) != '.'));
     }
-    else {    /*** for RINEX3 ***/
+    else {    
+        //如果版本号不是2，新的epoch行开始字符为“>”
         do {
             read_chk_line(p_line);
         } while (*p_line != '>');
     }
-    initialize_all(oldline, &nsat_old, 0);             /**** initialize all data ***/
+    //将数据重新初始化
+    initialize_all(oldline, &nsat_old, 0);             
 }
-/*---------------------------------------------------------------------*/
+//初始化一些数据
 void initialize_all(char* oldline, int* nsat_old, int count) {
     strcpy(oldline, "&");        /**** initialize the epoch data arc ****/
     clk_order = -1;             /**** initialize the clock data arc ****/
@@ -631,7 +676,6 @@ void data(int* sattbl) {
         }
         else {
             p_buff = strdiff(flag0[*i0], flag[i], p_buff);
-            //test
         }
     }
 }
