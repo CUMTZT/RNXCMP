@@ -163,9 +163,10 @@ int main(int argc, char* argv[]) {
     char newline[MAXCLM];
     char dummy[2] = { '\0','\0' };
     char* p, * p_event, * p_nsat, * p_satlst, * p_satold, * p_clock;
-    int sattbl[MAXSAT], i, j, shift_clk;
-    /* sattbl[i]: order (at the previous epoch) of i-th satellite */
-    /* (at the current epoch). -1 is set for the new satellites   */
+    //记录卫星在上个epoch line的位置
+    int sattbl[MAXSAT];
+
+    int i, j, shift_clk;
 
     parse_args(argc, argv);//解析参数,与算法无关，可不关注
 
@@ -175,7 +176,7 @@ int main(int argc, char* argv[]) {
     //解析文件头
     header();
 
-    //根据文件头解析，先申请长度为MAXCLM的数组，然后根据版本号将指针指向应该输入数据的位置
+    //先申请长度为MAXCLM的数组，然后根据版本号将指针指向应该输入数据的位置
     if (rinex_version == 2) {
         p_event = &newline[28];  //指向event flag
         p_nsat = &newline[29];  //指向n_sat
@@ -215,7 +216,7 @@ int main(int argc, char* argv[]) {
         if (ep_reset > 0 && ++ep_count > ep_reset) initialize_all(oldline, &nsat_old, 1);
 
 
-        //判断该行有没有时钟数据，有的话读取
+        //判断该行有没有时钟数据，有的话读取（我找了几个数据文件，没有有这个数据的数据文件）
         if (strchr(newline, '\0') > p_clock) {
             read_clock(p_clock, shift_clk);        /**** read clock offset ****/
         }
@@ -223,11 +224,12 @@ int main(int argc, char* argv[]) {
             clk_order = -1;                       /*** reset data arc for clock offset ***/
         }
 
+        //读取有几个卫星
         nsat = atoi(p_nsat);
         if (nsat > MAXSAT) error_exit(8, newline);
         if (nsat > 12 && rinex_version == 2) read_more_sat(nsat, p_satlst);  /*** read continuation lines ***/
 
-        /**** get observation ****/
+        //根据卫星数量，逐行读取数据，将卫星名存到buffer区里“C01C04C08C11C12C19C21C22”
         for (i = 0, p = p_satlst; i < nsat; i++, p += 3) {
             if (ggetline(dy1[i], flag[i], p, &ntype_record[i])) {
                 CLEAR_BUFF;
@@ -235,19 +237,20 @@ int main(int argc, char* argv[]) {
                 continue;
             }
         }
-        *p = '\0';    /*** terminate satellite list ***/
+        *p = '\0';   
 
+        //根据上一行的卫星顺序和本行卫星顺序，生成本行卫星在上一行的对应位置
         if (set_sat_table(p_satlst, p_satold, nsat_old, sattbl)) {
             CLEAR_BUFF;
             exit_status = EXIT_WARNING;
             continue;
         }
 
-        /***********************************************************/
-        /**** print change of the line & clock offset difference ****/
-        /**** and data difference                               ****/
-        /***********************************************************/
+
+        //此时两行的行头已经生成完毕，通过将本行数据与上一行数据做对比，生成本行应该输出的压缩数据
         p_buff = strdiff(oldline, newline, p_buff);
+
+        //没有对应数据，暂时没做
         if (clk_order > -1) {
             if (clk_order > 0) process_clock();            /**** process clock offset ****/
             put_clock(clk1.u[clk_order], clk1.l[clk_order], clk_order);
@@ -255,6 +258,7 @@ int main(int argc, char* argv[]) {
         else {
             *p_buff++ = '\n';
         }
+
         data(sattbl); *p_buff = '\0';
         /**************************************/
         /**** save current epoch to buffer ****/
@@ -580,11 +584,8 @@ void process_clock(void) {
         clk1.l[i + 1] = clk1.l[i] - clk0.l[i];
     }
 }
-/*---------------------------------------------------------------------*/
-int  set_sat_table(char* p_new, char* p_old, int nsat_old, int* sattbl) {
-    /**** sattbl : order of the satellites in the previous epoch   ****/
-    /**** if *sattbl is set to  -1, the data arc for the satellite ****/
-    /**** will be initialized                                      ****/
+//挨个对比本行和前一行的卫星顺序，前一行“C01C02C03”，本行“C02C01C03”
+int  set_sat_table(char* p_new, char* p_old, int nsat_old, int* sattbl) {                                
     int i, j;
     char* ps;
 
@@ -679,13 +680,11 @@ void data(int* sattbl) {
         }
     }
 }
-/*---------------------------------------------------------------------*/
+//逐个字符对比s1和s2，如果s2与s1对应字符相同则ds相同位置置空格，如果不同且s2位置上为空格，则用&符代替
+//其他情况则ds中保存s2对应字符
+//例如:s1为“2023 12 30 12 12 00” s2为“2023 12 30  9 12 30”转换后 ds为“           &9    3 ”
 char* strdiff(const char* s1, char* s2, char* ds) {
-    /********************************************************************/
-    /**   copy only the difference of string s2 from string s1         **/
-    /**   '&' is marked when some character changed to a space         **/
-    /**   trailing blank is eliminated and '/n' is added               **/
-    /********************************************************************/
+    //对比s2和s1，如果s2与s1对应字符相同则ds相同位置置空格，如果不同且s2位置上为空格，则用&符代替
     for (; *s1 != '\0' && *s2 != '\0'; s2++) {
         if (*s2 == *(s1++))
             *ds++ = ' ';
@@ -694,10 +693,16 @@ char* strdiff(const char* s1, char* s2, char* ds) {
         else
             *ds++ = *s2;
     }
+
+    //如果s1比s2长，则将s1剩下的放到ds中，然后将这些字符中任何不为空格的字符置为&
+    //例如s1为“2023 12 30 12 12 00 54”，s2为“2023 12 30  9 12 30”，转换后的ds为“           &9    3  &&”
     strcpy(ds, s1);
     for (; *ds; ds++) { if (*ds != ' ') *ds = '&'; }
+
+    //如果s2比s1长，则将s2剩下的直接全部放到ds中
     while (*s2) *ds++ = *s2++;
 
+    //如果ds最后几个字符是空格，则将其省略
     for (ds--; *ds == ' '; ds--);    /*** find pointer of last non-space character ***/
     *++ds = '\n'; *++ds = '\0';       /*** chop spaces at the end of the line ***/
     return ds;
@@ -705,11 +710,14 @@ char* strdiff(const char* s1, char* s2, char* ds) {
 /*---------------------------------------------------------------------*/
 int  ggetline(data_format* py1, char* flag, char* sat_id, int* ntype_rec) {
     /**** read data line for one satellite and       ****/
-    /**** set data difference and flags to variables ****/
+    /**** set data difference and flags to variables ****/ 
+   
     char line[MAXCLM], * p, * pmax, * p_1st_rec;
     int i, j, nfield, max_field;
 
     if (read_chk_line(line)) return 1;
+
+    //根据文件头中的配置，确定单个数据最大占用长度
     if (rinex_version == 2) {             /** for RINEX2 **/
         max_field = 5;                             /** maximum data types in one line **/
         *ntype_rec = ntype;                        /** # of data types for the satellite **/
@@ -725,15 +733,19 @@ int  ggetline(data_format* py1, char* flag, char* sat_id, int* ntype_rec) {
         }
         p_1st_rec = line + 3;
     }
-    for (i = 0; i < *ntype_rec; i += max_field) {                 /* for each line */
-        nfield = (*ntype_rec - i < max_field ? *ntype_rec - i : max_field); /*** expected # of data fields in the line ***/
+    for (i = 0; i < *ntype_rec; i += max_field) {                 
+        
+        //找到该行数据的最大位置
+        nfield = (*ntype_rec - i < max_field ? *ntype_rec - i : max_field); 
         pmax = p_1st_rec + 16 * nfield;
 
-        /*** Cut or pad spaces. Detect error if there is any character after *pmax ***/
+        //找到该行结束的位置
         p = strchr(line, '\0');
+        //如果该行在最大数据位置前就已经结束，用空格将数据填充到pmax
         if (p < pmax) {
             while (p < pmax) *p++ = ' '; *p = '\0';
         }
+        //如果数据长度大于pmax，则这行数据存在问题
         else {
             for (*p = ' '; p > pmax && *p == ' '; p--) {};
             if (p > pmax) {
@@ -743,8 +755,9 @@ int  ggetline(data_format* py1, char* flag, char* sat_id, int* ntype_rec) {
             }
         }
 
-        /*** parse the line (read value into py1) ***/
+        
         for (j = 0, p = p_1st_rec; j < nfield; j++, p += 16, py1++) {
+            //如果第11个位置上为“.”证明此处有数据
             if (*(p + 10) == '.') {
                 *flag++ = *(p + 14);
                 *flag++ = *(p + 15);
@@ -752,18 +765,21 @@ int  ggetline(data_format* py1, char* flag, char* sat_id, int* ntype_rec) {
                 read_value(p, &(py1->u[0]), &(py1->l[0]));
                 py1->order = 0;
             }
+            //判断是否为空白区域
             else if (strncmp(p, "              ", C14) == 0) {
                 if (rinex_version == 2 && strncmp((p + 14), "  ", C2) != 0) error_exit(20, line);
                 *flag++ = *(p + 14);
                 *flag++ = *(p + 15);
                 py1->order = -1;
             }
+            //否则文件格式问题，需要跳过
             else {
                 if (!skip_strange_epoch) error_exit(10, p);
                 fprintf(stderr, "WARNING: abnormal data field at line %ld....skip\n", nl_count);
                 return 1;
             }
         }
+        //读取下一行
         if (i + max_field < *ntype_rec) {
             if (read_chk_line(line)) return 1;   /* read continuation line */
         }
@@ -771,7 +787,7 @@ int  ggetline(data_format* py1, char* flag, char* sat_id, int* ntype_rec) {
     *flag = '\0';
     return 0;
 }
-/*---------------------------------------------------------------------*/
+//读取数据，将其切为上下两部分存储
 void read_value(char* p, long* pu, long* pl) {
     /**** divide the data into lower 5 digits and upper digits     ****/
     /**** input p :  pointer to one record (14 characters + '\0')  ****/
@@ -850,13 +866,9 @@ void put_clock(long du, long dl, int c_order) {
         p_buff += sprintf(p_buff, "%ld%8.8ld\n", du, labs(dl));
     }
 }
-//读一行数据，检查该行的格式
+//读一行数据，检查该行的格式，该行的最后一个字符必须为换行符，即“\n”
 int  read_chk_line(char* line) {
     char* p;
-    /***************************************/
-    /* Read and check one line.            */
-    /* The end of the line should be '\n'. */
-    /***************************************/
     nl_count++;
     if (fgets(line, MAXCLM, stdin) == NULL) error_exit(11, line);
     if ((p = strchr(line, '\n')) == NULL) {
@@ -870,7 +882,9 @@ int  read_chk_line(char* line) {
         }
     }
     if (*(p - 1) == '\r')p--;   /*** check DOS CR/LF ***/
-    while (*--p == ' ' && p > line) {}; *++p = '\0';   /** Chop blank **/
+
+    //清除换行符前的所有空格，例如"aaaaaa aaa   a   \n"清除后“aaaaaa aaa   a\n”
+    while (*--p == ' ' && p > line) {}; *++p = '\0'; 
     return 0;
 }
 /*---------------------------------------------------------------------*/
