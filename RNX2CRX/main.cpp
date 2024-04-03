@@ -163,7 +163,7 @@ int main(int argc, char* argv[]) {
     char newline[MAXCLM];
     char dummy[2] = { '\0','\0' };
     char* p, * p_event, * p_nsat, * p_satlst, * p_satold, * p_clock;
-    //记录卫星在上个epoch line的位置
+    //记录卫星在上个单元的位置
     int sattbl[MAXSAT];
 
     int i, j, shift_clk;
@@ -181,7 +181,7 @@ int main(int argc, char* argv[]) {
         p_event = &newline[28];  //指向event flag
         p_nsat = &newline[29];  //指向n_sat
         p_satlst = &newline[32];  //指向satellite list
-        p_satold = &oldline[32];  //指向上一行的n_sat
+        p_satold = &oldline[32];  //指向上一单元的p_satlst
         p_clock = &newline[68];  //指向clock offset data
         shift_clk = 1;
     }
@@ -259,10 +259,10 @@ int main(int argc, char* argv[]) {
             *p_buff++ = '\n';
         }
 
+        //处理数据区，并保存至文件中
         data(sattbl); *p_buff = '\0';
-        /**************************************/
-        /**** save current epoch to buffer ****/
-        /**************************************/
+
+        //将当前数据保存，以便下一单元使用
         nsat_old = nsat;
         sprintf(oldline, "%s", newline);
         clk0 = clk1;
@@ -486,15 +486,15 @@ int  get_next_epoch(char* p_line) {
     }
     return 1;
 }
-//跳到下一个epoch line
+//跳到下一个单元
 void skip_to_next(char* p_line) {
-    //输出上一个不正确格式行
+    //输出上一个不正确单元的错误行
     fprintf(stderr, " WARNING at line %ld: strange format. skip to next epoch.\n", nl_count);
     exit_status = EXIT_WARNING;
 
-    //寻找下一个epoch line
+    //寻找下一个单元
     if (rinex_version == 2) {
-        //如果版本号为2，要根据该行多个数据格式是否在范围内或者值是否符合格式才能判断改行是否为新的epoch line
+        //如果版本号为2，要根据多个数据格式是否在范围内或者值是否符合格式才能判断改行是否为新的单元的起始行
         do {                              
             read_chk_line(p_line);
         } while (strlen(p_line) < 29 || *p_line != ' ' || *(p_line + 3) != ' '
@@ -505,7 +505,7 @@ void skip_to_next(char* p_line) {
             || (strlen(p_line) > 68 && *(p_line + 70) != '.'));
     }
     else {    
-        //如果版本号不是2，新的epoch行开始字符为“>”
+        //如果版本号不是2，新的单元开始字符为“>”
         do {
             read_chk_line(p_line);
         } while (*p_line != '>');
@@ -584,7 +584,7 @@ void process_clock(void) {
         clk1.l[i + 1] = clk1.l[i] - clk0.l[i];
     }
 }
-//挨个对比本行和前一行的卫星顺序，前一行“C01C02C03”，本行“C02C01C03”
+//挨个对比本单元和前一单元的卫星顺序
 int  set_sat_table(char* p_new, char* p_old, int nsat_old, int* sattbl) {                                
     int i, j;
     char* ps;
@@ -645,11 +645,14 @@ void data(int* sattbl) {
 
     for (i = 0, i0 = sattbl; i < nsat; i++, i0++) {
         for (j = 0, py1 = dy1[i]; j < ntype_record[i]; j++, py1++) {
-            if (py1->order >= 0) {       /*** if the numerical data field is non-blank ***/
+            //如果该行数据在该区域存在数据
+            if (py1->order >= 0) { 
+                //如果上一单元相同位置不存在数据
                 if (*i0 < 0 || dy0[*i0][j].order == -1) {
                     /**** initialize the data arc ****/
                     py1->order = 0; p_buff += sprintf(p_buff, "%d&", ARC_ORDER);
                 }
+                //上一单元在该位置存在数据
                 else {
                     take_diff(py1, &(dy0[*i0][j]));
                     if (labs(py1->u[py1->order]) > 100000) {
@@ -707,7 +710,7 @@ char* strdiff(const char* s1, char* s2, char* ds) {
     *++ds = '\n'; *++ds = '\0';       /*** chop spaces at the end of the line ***/
     return ds;
 }
-/*---------------------------------------------------------------------*/
+//获取数据区的数据，将其转换后存放在dataformat的结构体（二维数组）中
 int  ggetline(data_format* py1, char* flag, char* sat_id, int* ntype_rec) {
     /**** read data line for one satellite and       ****/
     /**** set data difference and flags to variables ****/ 
