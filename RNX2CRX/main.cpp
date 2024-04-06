@@ -86,7 +86,7 @@ typedef struct clock_format {
 
 /***************************************************************************
 * 简介：数据格式结构体
-* 用途：用于存储数据，由于数据可能超过long型数据范围，因此将时间数据切分
+* 用途：用于存储数据，由于数据可能超过long型数据范围，因此将数据切分
 ****************************************************************************/
 typedef struct data_format {
     long u[ARC_ORDER + 1];      //高位
@@ -396,10 +396,11 @@ void header(void) {
         //将读到的行输出到crx文件中
         printf("%s\n", line);
 
-        //解析数据行
+        //version为2时才用得到
         if (strncmp(&line[60], "# / TYPES OF OBSERV", C1 * 19) == 0 && line[5] != ' ') {
             ntype = atoi(line);                                        /** for RINEX2 **/
         }
+        //获取每一种类型的数据块最大个数
         else if (strncmp(&line[60], "SYS / # / OBS TYPES", C1 * 19) == 0) { /** for RINEX3 **/
             if (line[0] != ' ') ntype_gnss[(unsigned int)line[0]] = atoi(&line[3]);
             if (ntype_gnss[(unsigned int)line[0]] > MAXTYPE) error_exit(16, line);
@@ -584,7 +585,7 @@ void process_clock(void) {
         clk1.l[i + 1] = clk1.l[i] - clk0.l[i];
     }
 }
-//挨个对比本单元和前一单元的卫星顺序
+//对比本单元和前一单元的卫星顺序，将本单元的顺序与上单元对应如 C1在本单元的顺序是第11，在上单元的顺序为13，则sattbl[11]的值为13
 int  set_sat_table(char* p_new, char* p_old, int nsat_old, int* sattbl) {                                
     int i, j;
     char* ps;
@@ -610,7 +611,7 @@ int  set_sat_table(char* p_new, char* p_old, int nsat_old, int* sattbl) {
     }
     return 0;
 }
-/*---------------------------------------------------------------------*/
+//版本号为2时才用的到，先忽略
 int  read_more_sat(int n, char* p) {
     /**** read continuation line of satellite list (for RINEX2) ****/
     char line[MAXCLM];
@@ -654,7 +655,11 @@ void data(int* sattbl) {
                 }
                 //上一单元在该位置存在数据
                 else {
+                    //将二者得差存在py1中
                     take_diff(py1, &(dy0[*i0][j]));
+
+
+                    //如果高位的绝对值大于100000，要插入&符
                     if (labs(py1->u[py1->order]) > 100000) {
                         /**** initialization of the arc for large cycle slip  ****/
                         py1->order = 0; p_buff += sprintf(p_buff, "%d&", ARC_ORDER);
@@ -759,6 +764,7 @@ int  ggetline(data_format* py1, char* flag, char* sat_id, int* ntype_rec) {
         }
 
         
+        //这一行中
         for (j = 0, p = p_1st_rec; j < nfield; j++, p += 16, py1++) {
             //如果第11个位置上为“.”证明此处有数据
             if (*(p + 10) == '.') {
@@ -796,33 +802,42 @@ void read_value(char* p, long* pu, long* pl) {
     /**** input p :  pointer to one record (14 characters + '\0')  ****/
     /**** output  *pu, *pl: upper and lower digits the data        ****/
 
+    //三个指针指向buffer的第7、8、9位
     char* p7, * p8, * p9;
     p7 = p + 7;
     p8 = p7 + 1;
     p9 = p8 + 1;
 
+    //其中第10位为小数点，使用第9位的值覆盖“    123456.789”，其中空格也算一位，替换后为“    1234566789”
     *(p9 + 1) = *p9;            /* shift two digits: ex. 123.456 -> 1223456,  -.345 ->   -345 */
+    //使用第8位的值替换第9位，“    1234556789”
     *p9 = *p8;                /*                       -12.345 -> -112345, -1.234 -> --1234 */
+
+    //将9位之后转换为长整型，pl = 56789
     *pl = atol(p9);           /*                         0.123 ->  . 0123, -0.123 -> --0123 */
 
+    //判断第7位是否位空格，如果是，高位值为0
     if (*p7 == ' ') {
         *pu = 0;
     }
+    //判断第7位是否位负号，如果为符号，则将底位也置负
     else if (*p7 == '-') {
         *pu = 0;
         *pl = -*pl;
     }
+    //其他情况则证明高位有值，将第8位置成“.”,然后将整个值取向下取整（消除小数点）
     else {
         *p8 = '.';
         *pu = atol(p);
         if (*pu < 0) *pl = -*pl;
     }
 }
-/*---------------------------------------------------------------------*/
+
 void take_diff(data_format* py1, data_format* py0) {
     int k;
 
     py1->order = py0->order;
+    if()
     if (py1->order < ARC_ORDER) (py1->order)++;
     if (py1->order > 0) {
         for (k = 0; k < py1->order; k++) {
@@ -831,9 +846,8 @@ void take_diff(data_format* py1, data_format* py0) {
         }
     }
 }
-/*---------------------------------------------------------------------*/
+//将数据得高低位通过计算生成字符串
 void putdiff(long dddu, long dddl) {
-
     dddu += dddl / 100000; dddl %= 100000;
     if (dddu < 0 && dddl>0) {
         dddu++; dddl -= 100000;
