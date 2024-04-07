@@ -201,6 +201,7 @@ int main(int argc, char* argv[]) {
 *       该for循环只有在exit时退出
 ****************************************************************************/
     for (CLEAR_BUFF;; FLUSH_BUFF) {
+        SKIP:
         //返回的时0，文件结束，正常退出程序
         if (!get_next_epoch(newline)) no_error_exit();
 
@@ -234,7 +235,7 @@ int main(int argc, char* argv[]) {
             if (ggetline(dy1[i], flag[i], p, &ntype_record[i])) {
                 CLEAR_BUFF;
                 exit_status = EXIT_WARNING;
-                continue;
+                goto SKIP;
             }
         }
         *p = '\0';   
@@ -648,29 +649,31 @@ void data(int* sattbl) {
         for (j = 0, py1 = dy1[i]; j < ntype_record[i]; j++, py1++) {
             //如果该行数据在该区域存在数据
             if (py1->order >= 0) { 
-                //如果上一单元相同位置不存在数据
+                //如果上一单元相同位置不存在数据，因此此单元为首行，存原始数据
                 if (*i0 < 0 || dy0[*i0][j].order == -1) {
                     /**** initialize the data arc ****/
                     py1->order = 0; p_buff += sprintf(p_buff, "%d&", ARC_ORDER);
                 }
                 //上一单元在该位置存在数据
                 else {
-                    //将二者得差存在py1中
+                    //计算与上单元的数据差异
                     take_diff(py1, &(dy0[*i0][j]));
 
 
-                    //如果高位的绝对值大于100000，要插入&符
+                    //如果高位的绝对值大于100000，证明该单元数据与上单元数据差距过大，不宜再连续存储，因此以该行为首行，存原始数据
                     if (labs(py1->u[py1->order]) > 100000) {
                         /**** initialization of the arc for large cycle slip  ****/
                         py1->order = 0; p_buff += sprintf(p_buff, "%d&", ARC_ORDER);
                     }
                 }
+                //将数据输出
                 putdiff(py1->u[py1->order], py1->l[py1->order]);
             }
             else if (*i0 >= 0 && rinex_version == 2) {
                 /**** CRINEX1 (RINEX2) initialize flags for blank field, not put '&' ****/
                 flag0[*i0][j * 2] = flag0[*i0][j * 2 + 1] = ' ';
             }
+            //在数据后方填入空格
             if (j < ntype_record[i] - 1) *p_buff++ = ' ';   /** ' ' :field separator **/
         }
         *(p_buff++) = ' ';  /* write field separator */
@@ -768,6 +771,7 @@ int  ggetline(data_format* py1, char* flag, char* sat_id, int* ntype_rec) {
         for (j = 0, p = p_1st_rec; j < nfield; j++, p += 16, py1++) {
             //如果第11个位置上为“.”证明此处有数据
             if (*(p + 10) == '.') {
+                //第14、15个字符为flag，具体作用不知道
                 *flag++ = *(p + 14);
                 *flag++ = *(p + 15);
                 *(p + 14) = '\0';
@@ -832,12 +836,11 @@ void read_value(char* p, long* pu, long* pl) {
         if (*pu < 0) *pl = -*pl;
     }
 }
-
+//数据区
 void take_diff(data_format* py1, data_format* py0) {
     int k;
 
     py1->order = py0->order;
-    if()
     if (py1->order < ARC_ORDER) (py1->order)++;
     if (py1->order > 0) {
         for (k = 0; k < py1->order; k++) {
